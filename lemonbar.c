@@ -116,8 +116,9 @@ static bool dock = false;
 static bool topbar = true;
 static int bw = -1, bh = -1, bx = 0, by = 0;
 static int bu = 1; // Underline height
-static rgba_t fgc, bgc, ugc;
-static rgba_t dfgc, dbgc, dugc;
+static int bordw = 1; // Border width
+static rgba_t fgc, bgc, ugc, bordc;
+static rgba_t dfgc, dbgc, dugc, dbordc;
 static area_stack_t area_stack;
 
 static XftColor sel_fg;
@@ -895,6 +896,34 @@ set_ewmh_atoms (void)
         xcb_change_property(c, XCB_PROP_MODE_REPLACE, mon->window, atom_list[NET_WM_STRUT], XCB_ATOM_CARDINAL, 32, 4, strut);
         xcb_change_property(c, XCB_PROP_MODE_REPLACE, mon->window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, 3, "bar");
         xcb_change_property(c, XCB_PROP_MODE_REPLACE, mon->window, XCB_ATOM_WM_CLASS, XCB_ATOM_STRING, 8, 12, "lemonbar\0Bar");
+
+        /* full disclosure:
+         * this is copied from wmutils/core/chwb.c
+         */
+        uint32_t values[3];
+        uint16_t curr_bwidth;
+        int bmask;
+        xcb_get_geometry_reply_t *geom;
+       
+        if (bordw != -1) { 
+            geom = xcb_get_geometry_reply(c, xcb_get_geometry(c, mon->window), NULL);
+            if (!geom)
+                return; // TODO should probably investigate why this needs to be here
+    
+            curr_bwidth = geom->border_width;
+            values[0] = geom->x + curr_bwidth - bordw;
+            values[1] = geom->y + curr_bwidth - bordw;
+            values[2] = bordw;
+
+            bmask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_BORDER_WIDTH ;
+            xcb_configure_window(c, mon->window, bmask, values);
+        }
+
+        if (dbordc.v != NULL) {
+            values[0] = dbordc.v;
+            bmask = XCB_CW_BORDER_PIXEL;
+            xcb_change_window_attributes(c, mon->window, bmask, values);
+        }
     }
 }
 
@@ -1461,6 +1490,9 @@ main (int argc, char **argv)
     dfgc = fgc = (rgba_t)0xffffffffU;
 
     dugc = ugc = fgc;
+    
+    // default border color (red)
+    dbordc = bordc = (rgba_t)0xffff0000U;
 
     // A safe default
     areas = 10;
@@ -1471,7 +1503,8 @@ main (int argc, char **argv)
     // Connect to the Xserver and initialize scr
     xconn();
 
-    while ((ch = getopt(argc, argv, "hg:bdf:a:pu:B:F:U:n:o:")) != -1) {
+    // i = border width, I = border color
+    while ((ch = getopt(argc, argv, "hg:bdf:a:pu:B:F:U:n:o:i:I:")) != -1) {
         switch (ch) {
             case 'h':
                 printf ("lemonbar version %s patched with XFT support\n", VERSION);
@@ -1487,7 +1520,9 @@ main (int argc, char **argv)
                         "\t-u Set the underline/overline height in pixels\n"
                         "\t-B Set background color in #AARRGGBB\n"
                         "\t-F Set foreground color in #AARRGGBB\n"
-                        "\t-o Add a vertical offset to the text, it can be negative\n", argv[0]);
+                        "\t-o Add a vertical offset to the text, it can be negative\n"
+                        "\t-i Set border width in px\n"
+                        "\t-I Set border color in #AARRGGBB\n", argv[0]);
                 exit (EXIT_SUCCESS);
             case 'g': (void)parse_geometry_string(optarg, geom_v); break;
             case 'p': permanent = true; break;
@@ -1501,6 +1536,8 @@ main (int argc, char **argv)
             case 'F': dfgc = fgc = parse_color(optarg, NULL, (rgba_t)0xffffffffU); break;
             case 'U': dugc = ugc = parse_color(optarg, NULL, fgc); break;
             case 'a': areas = strtoul(optarg, NULL, 10); break;
+            case 'i': bordw = strtoul(optarg, NULL, 10); break;
+            case 'I': dbordc = bordc = parse_color(optarg, NULL, (rgba_t)0xffff0000U); break;
         }
     }
 
